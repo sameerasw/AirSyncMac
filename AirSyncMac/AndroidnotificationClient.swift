@@ -93,13 +93,15 @@ class AndroidNotificationClient {
     
 
     private func handleConnectionReady() {
-        isActuallyConnected = true
-        reconnectTimer?.invalidate()
-        DispatchQueue.main.async {
-             self.showSystemNotification(title: "AirSync", body: "Connected to Android at \(self.host.debugDescription)")
+            isActuallyConnected = true
+            reconnectTimer?.invalidate()
+            DispatchQueue.main.async {
+                 // Use the configured device name
+                 let deviceName = ClientManager.shared.androidDeviceName
+                 self.showSystemNotification(title: "AirSync", body: "Connected to \(deviceName) (\(self.host.debugDescription))")
+            }
+            receiveData()
         }
-        receiveData()
-    }
 
     private func handleConnectionError(_ error: NWError) {
         isActuallyConnected = false
@@ -214,127 +216,104 @@ class AndroidNotificationClient {
 
 
     private func showNotification(_ data: NotificationData) {
-        print("AirSyncMac: showNotification called with App: \(data.app ?? "N/A"), Title: \(data.title ?? "N/A")")
-        let content = UNMutableNotificationContent()
-        
-        let appName = data.app?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let originalTitle = data.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Notification"
-        
-        content.title = !appName.isEmpty ? "\(appName): \(originalTitle)" : originalTitle
-        content.subtitle = "From Android"
-        content.body = data.text ?? ""
-        content.sound = .default // Ensure this is not nil if you want sound
-        
-        // --- Icon Attachment Logic ---
-        var notificationAttachments: [UNNotificationAttachment] = []
-        if let iconBase64 = data.iconBase64String, !iconBase64.isEmpty {
-            print("AirSyncMac: Icon base64 string is present (length: \(iconBase64.count)). First 30 chars: \(iconBase64.prefix(30))")
-            // The Base64 string might contain escaped slashes `\/` from JSON.
-            // Standard Base64 decoding should handle this if the string itself is valid.
-            if let iconData = Data(base64Encoded: iconBase64, options: .ignoreUnknownCharacters) {
-                print("AirSyncMac: Successfully decoded base64 string to data (size: \(iconData.count) bytes).")
-                if let image = NSImage(data: iconData) {
-                    print("AirSyncMac: Successfully created NSImage from icon data.")
-                    let imageIdentifier = UUID().uuidString
-                    let tempDirectory = FileManager.default.temporaryDirectory
-                    let tempFilename = "airsync_icon_\(imageIdentifier).png" // Always save as PNG for consistency
-                    let tempURL = tempDirectory.appendingPathComponent(tempFilename)
-                    
-                    do {
-                        guard let tiffRepresentation = image.tiffRepresentation,
-                              let bitmapImageRep = NSBitmapImageRep(data: tiffRepresentation),
-                              let pngData = bitmapImageRep.representation(using: .png, properties: [:]) else {
-                            print("AirSyncMac: ERROR - Could not convert NSImage to PNG data.")
-                            // Attempt to submit notification without icon if conversion fails
-                            self.submitNotificationRequest(content: content, identifierSuffix: "-noIconConvFail")
+            print("AirSyncMac: showNotification called with App: \(data.app ?? "N/A"), Title: \(data.title ?? "N/A")")
+            let content = UNMutableNotificationContent()
+            
+            let appName = data.app?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let originalTitle = data.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Notification"
+            let deviceName = ClientManager.shared.androidDeviceName // Get the configured device name
+            
+            content.title = !appName.isEmpty ? "\(appName): \(originalTitle)" : originalTitle
+            content.subtitle = "From \(deviceName)" // Use device name in subtitle
+            content.body = data.text ?? ""
+            content.sound = .default
+            
+            var notificationAttachments: [UNNotificationAttachment] = []
+            if let iconBase64 = data.iconBase64String, !iconBase64.isEmpty {
+                if let iconData = Data(base64Encoded: iconBase64, options: .ignoreUnknownCharacters) {
+                    if let image = NSImage(data: iconData) {
+                        let imageIdentifier = UUID().uuidString
+                        let tempDirectory = FileManager.default.temporaryDirectory
+                        let tempFilename = "airsync_icon_\(imageIdentifier).png"
+                        let tempURL = tempDirectory.appendingPathComponent(tempFilename)
+                        do {
+                            guard let tiffRepresentation = image.tiffRepresentation,
+                                  let bitmapImageRep = NSBitmapImageRep(data: tiffRepresentation),
+                                  let pngData = bitmapImageRep.representation(using: .png, properties: [:]) else {
+                                self.submitNotificationRequest(content: content, identifierSuffix: "-noIconConvFail")
+                                return
+                            }
+                            try pngData.write(to: tempURL)
+                            let attachment = try UNNotificationAttachment(identifier: imageIdentifier, url: tempURL, options: nil)
+                            notificationAttachments.append(attachment)
+                        } catch {
+                            print("AirSyncMac: ERROR creating or writing attachment: \(error.localizedDescription)")
+                            self.submitNotificationRequest(content: content, identifierSuffix: "-noIconAttachFail")
                             return
                         }
-                        
-                        try pngData.write(to: tempURL)
-                        print("AirSyncMac: Successfully wrote PNG data to temporary file: \(tempURL.path)")
-                        
-                        let attachment = try UNNotificationAttachment(identifier: imageIdentifier, url: tempURL, options: nil)
-                        print("AirSyncMac: Successfully created UNNotificationAttachment.")
-                        notificationAttachments.append(attachment)
-                    } catch {
-                        print("AirSyncMac: ERROR creating or writing notification attachment: \(error.localizedDescription)")
-                        // Attempt to submit notification without icon if attachment creation fails
-                        self.submitNotificationRequest(content: content, identifierSuffix: "-noIconAttachFail")
+                    } else {
+                        self.submitNotificationRequest(content: content, identifierSuffix: "-noIconNSImageFail")
                         return
                     }
                 } else {
-                    print("AirSyncMac: ERROR - Could not create NSImage from icon data. Data might be corrupted or not a supported image format.")
-                    self.submitNotificationRequest(content: content, identifierSuffix: "-noIconNSImageFail")
+                    self.submitNotificationRequest(content: content, identifierSuffix: "-noIconBase64Fail")
                     return
                 }
-            } else {
-                print("AirSyncMac: ERROR - Could not decode base64 icon string. String might be malformed.")
-                self.submitNotificationRequest(content: content, identifierSuffix: "-noIconBase64Fail")
-                return
             }
-        } else {
-            print("AirSyncMac: No icon_base64 string provided or it's empty.")
+            
+            content.attachments = notificationAttachments
+            self.submitNotificationRequest(content: content, identifierSuffix: "-withOrWithoutIcon")
         }
-        
-        content.attachments = notificationAttachments
-        self.submitNotificationRequest(content: content, identifierSuffix: "-withOrWithoutIcon")
-    }
 
-    private func submitNotificationRequest(content: UNMutableNotificationContent, identifierSuffix: String = "") {
-        let requestIdentifier = UUID().uuidString + identifierSuffix
-        let request = UNNotificationRequest(identifier: requestIdentifier, content: content, trigger: nil)
-        
-        print("AirSyncMac: Submitting notification (ID: \(requestIdentifier)). Title: '\(content.title)', Attachments: \(content.attachments.count)")
-
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error = error {
-                print("AirSyncMac: CRITICAL ERROR adding notification (ID: \(requestIdentifier)): \(error.localizedDescription)")
-                print("AirSyncMac: Failed Notification Content: Title='\(content.title)', Subtitle='\(content.subtitle ?? "")', Body='\(content.body)', Attachments Count: \(content.attachments.count)")
-                if let firstAttachment = content.attachments.first {
-                    print("AirSyncMac: Failed Attachment URL: \(firstAttachment.url.path), Identifier: \(firstAttachment.identifier)")
+        private func submitNotificationRequest(content: UNMutableNotificationContent, identifierSuffix: String = "") {
+            let requestIdentifier = UUID().uuidString + identifierSuffix
+            let request = UNNotificationRequest(identifier: requestIdentifier, content: content, trigger: nil)
+            UNUserNotificationCenter.current().add(request) { error in
+                if let error = error {
+                    print("AirSyncMac: CRITICAL ERROR adding notification (ID: \(requestIdentifier)): \(error.localizedDescription)")
+                } else {
+                    print("AirSyncMac: Notification request (ID: \(requestIdentifier)) successfully added.")
                 }
-            } else {
-                print("AirSyncMac: Notification request (ID: \(requestIdentifier)) successfully added.")
             }
         }
-    }
     
     private func updateClipboard(text: String?) {
-        guard let text = text else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        print("AirSyncMac: Mac clipboard updated.")
-    }
-    
-    private func showSystemNotification(title: String, body: String) {
-        DispatchQueue.main.async {
-            let content = UNMutableNotificationContent()
-            content.title = title
-            content.body = body
-            content.sound = .default
-            let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-            UNUserNotificationCenter.current().add(request)
-        }
-    }
-
-    func send(string: String) {
-            guard isActuallyConnected, let connection = connection else {
-                print("AirSyncMac: Not connected. Cannot send string: \(string.prefix(30))")
-                return
-            }
-            let fullMessage = string + "\n"
-            guard let dataToSend = fullMessage.data(using: .utf8) else {
-                print("AirSyncMac: Error encoding string for sending.")
-                return
-            }
-            connection.send(content: dataToSend, completion: .contentProcessed { error in
-                DispatchQueue.main.async {
-                    if let error = error { print("AirSyncMac: Send error: \(error.localizedDescription)") }
-                    // else { print("AirSyncMac: String sent.") }
-                }
-            })
+            guard let text = text else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            let deviceName = ClientManager.shared.androidDeviceName
+            self.showSystemNotification(title: "AirSync", body: "Clipboard updated from \(deviceName).") // Include device name
+            print("AirSyncMac: Mac clipboard updated.")
         }
         
+        private func showSystemNotification(title: String, body: String) {
+            DispatchQueue.main.async {
+                let content = UNMutableNotificationContent()
+                content.title = title
+                content.body = body
+                content.sound = .default
+                let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+                UNUserNotificationCenter.current().add(request)
+            }
+        }
+
+    func send(string: String) {
+                guard isActuallyConnected, let connection = connection else {
+                    print("AirSyncMac: Not connected. Cannot send string: \(string.prefix(30))")
+                    return
+                }
+                let fullMessage = string + "\n"
+                guard let dataToSend = fullMessage.data(using: .utf8) else {
+                    print("AirSyncMac: Error encoding string for sending.")
+                    return
+                }
+                connection.send(content: dataToSend, completion: .contentProcessed { error in
+                    DispatchQueue.main.async {
+                        if let error = error { print("AirSyncMac: Send error: \(error.localizedDescription)") }
+                    }
+                })
+            }
+
         func disconnect() {
             print("AirSyncMac: Disconnect called.")
             reconnectTimer?.invalidate()

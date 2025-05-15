@@ -1,121 +1,185 @@
-// AirSyncMac/AirSyncMac/ControlPanelView.swift
 import SwiftUI
+import AppKit
 
 struct ControlPanelView: View {
     @StateObject private var clientManager = ClientManager.shared
     
-    // Local states for text fields to avoid direct modification of clientManager's host/port
-    // before explicitly connecting with new values.
     @State private var editHost: String = ""
     @State private var editPort: String = ""
-    
+    @State private var editDeviceName: String = ""
+
+    @State private var isMacClipboardEmpty: Bool = true
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            Text("Connection Settings")
-                .font(.headline)
+        ZStack {
+            VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
+                .edgesIgnoringSafeArea(.all)
 
-            HStack {
-                TextField("Android IP Address", text: $editHost)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                
-                TextField("Port", text: $editPort)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .frame(width: 70)
-                
-                ConnectionStatusIndicator(status: clientManager.connectionStatus)
-                    .padding(.leading, 5)
-            }
-            
-            HStack(spacing: 10) {
-                Button(action: connectClient) {
-                    Text("Connect")
-                        .frame(minWidth: 80)
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Device Settings")
+                    .font(.title2)
+                    .bold()
+
+                VStack(spacing: 12) {
+                    TextField("Android Device Name", text: $editDeviceName)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(saveSettingsAndAttemptConnect)
+
+                    HStack(spacing: 12) {
+                        TextField("Android IP Address", text: $editHost)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit(saveSettingsAndAttemptConnect)
+
+                        TextField("Port", text: $editPort)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 80)
+                            .onSubmit(saveSettingsAndAttemptConnect)
+                    }
                 }
-                .disabled(clientManager.isConnectingOrConnected) // Disable if connecting or connected
-                
-                Button(action: disconnectClient) {
-                    Text("Disconnect")
-                        .frame(minWidth: 80)
+
+                HStack {
+                    ConnectionStatusIndicator(status: clientManager.connectionStatus)
+
+                    Button(action: saveSettingsAndAttemptConnect) {
+                        Label(
+                            clientManager.isConnectingOrConnected ? "Update & Reconnect" : "Save & Connect",
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                    .disabled(editHost.isEmpty || editPort.isEmpty || UInt16(editPort) == nil)
+
+                    if clientManager.isConnectingOrConnected {
+                        Button(action: { clientManager.disconnect() }) {
+                            Label("Disconnect", systemImage: "xmark.circle")
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                        .controlSize(.regular)
+                    }
+
+                    Spacer()
                 }
-                .disabled(!clientManager.isConnectingOrConnected && !clientManager.isConnected) // Disable if not connected and not attempting
+
+                Text("Status: \(clientManager.connectionStatus)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.bottom, 5)
+
+                Divider()
+
+                Text("Send to Android Clipboard")
+                    .font(.title3)
+                    .bold()
+
+                TextEditor(text: $clientManager.textToSendToAndroidClipboard)
+                    .frame(height: 100)
+                    .padding(6)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(NSColor.textBackgroundColor)))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.2)))
+
+                HStack {
+                    Button(action: {
+                        clientManager.sendClipboardToAndroid()
+                    }) {
+                        Label("Send Text Above", systemImage: "paperplane.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!clientManager.isConnected || clientManager.textToSendToAndroidClipboard.isEmpty)
+
+                    Spacer()
+
+                    Button(action: {
+                        clientManager.sendMacClipboardToAndroid()
+                    }) {
+                        Label("Send Current Clipboard", systemImage: "doc.on.clipboard")
+                    }
+                    .disabled(!clientManager.isConnected || isMacClipboardEmpty)
+                }
+                .padding(.top, 6)
+
+                Spacer()
             }
-            
-            Text("Status: \(clientManager.connectionStatus)")
-                .font(.caption)
-                .foregroundColor(.gray)
-                .lineLimit(2)
-                .frame(height: 30) // Ensure space for two lines of status
-                .padding(.bottom, 5)
-
-            Divider()
-
-            Text("Send to Android Clipboard")
-                .font(.headline)
-            
-            TextEditor(text: $clientManager.textToSendToAndroidClipboard)
-                .frame(height: 80)
-                .border(Color.gray.opacity(0.3), width: 1)
-                .clipShape(RoundedRectangle(cornerRadius: 4)) // So border follows rounding
-
-            Button(action: sendClipboardText) {
-                Text("Send to Android")
-                    .frame(minWidth: 120)
-            }
-            .disabled(!clientManager.isConnected || clientManager.textToSendToAndroidClipboard.isEmpty)
-
-            Spacer() // Push content to the top
+            .padding(24)
         }
-        .padding()
         .onAppear {
-            // Initialize editHost and editPort from ClientManager's persisted values
             editHost = clientManager.currentHost
             editPort = String(clientManager.currentPort)
+            editDeviceName = clientManager.androidDeviceName
+            updateMacClipboardStatus()
         }
-        // Optional: Add a background to make it look more like a typical app window
-        // .background(Color(NSColor.windowBackgroundColor))
-    }
-    
-    private func connectClient() {
-        // Validate port input
-        guard let portNumber = UInt16(editPort), portNumber > 0 else {
-            clientManager.connectionStatus = "Invalid Port Number"
-            return
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            updateMacClipboardStatus()
         }
-        // Update ClientManager with potentially new host/port from text fields
-        clientManager.updateConnection(host: editHost, port: portNumber)
-        clientManager.connect()
-    }
-    
-    private func disconnectClient() {
-        clientManager.disconnect()
     }
 
-    private func sendClipboardText() {
-        clientManager.sendClipboardToAndroid()
-        // Optionally clear the text field after sending:
-        // clientManager.textToSendToAndroidClipboard = ""
+    private func saveSettingsAndAttemptConnect() {
+        guard let portNumber = UInt16(editPort), portNumber > 0 else {
+            clientManager.connectionStatus = "Error: Invalid Port"
+            return
+        }
+
+        let deviceNameToSave = editDeviceName.isEmpty ? "Phone" : editDeviceName
+
+        clientManager.updateSettings(
+            host: editHost,
+            port: portNumber,
+            deviceName: deviceNameToSave
+        )
+        clientManager.connect()
+    }
+
+    private func updateMacClipboardStatus() {
+        if let clipboardString = NSPasteboard.general.string(forType: .string), !clipboardString.isEmpty {
+            isMacClipboardEmpty = false
+        } else {
+            isMacClipboardEmpty = true
+        }
     }
 }
 
 struct ConnectionStatusIndicator: View {
-    let status: String // Pass the full status string
-    
+    let status: String
+
     var color: Color {
         switch status {
         case "Connected":
             return .green
-        case "Connecting...", "Preparing...", "Setup...", "Waiting...":
-            return .orange // Indicate an attempt or wait
-        default: // Disconnected, Failed, Error
+        case let s where s.starts(with: "Connecting") || s.starts(with: "Preparing") || s.starts(with: "Setup") || s.starts(with: "Waiting"):
+            return .orange
+        default:
             return .red
         }
     }
-    
+
     var body: some View {
         Circle()
-            .frame(width: 15, height: 15)
-            .foregroundColor(color)
-            .shadow(color: color.opacity(0.7), radius: 2)
+            .fill(color)
+            .frame(width: 12, height: 12)
+            .shadow(color: color.opacity(0.6), radius: 1)
+            .padding(.trailing, 6)
+    }
+}
+
+/// macOS glass effect wrapper using NSVisualEffectView
+struct VisualEffectView: NSViewRepresentable {
+    var material: NSVisualEffectView.Material
+    var blendingMode: NSVisualEffectView.BlendingMode
+    var state: NSVisualEffectView.State = .active
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = state
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = material
+        nsView.blendingMode = blendingMode
+        nsView.state = state
     }
 }
 
@@ -123,8 +187,8 @@ struct ConnectionStatusIndicator: View {
 struct ControlPanelView_Previews: PreviewProvider {
     static var previews: some View {
         ControlPanelView()
-            .environmentObject(ClientManager.shared) // For preview
-            .frame(width: 400, height: 380) // Simulate typical window size
+            .frame(width: 420, height: 520)
+            .preferredColorScheme(.dark)
     }
 }
 #endif
