@@ -44,7 +44,7 @@ class AndroidNotificationClient: NSObject, UNUserNotificationCenterDelegate {
         self.host = NWEndpoint.Host(host)
         self.port = NWEndpoint.Port(integerLiteral: port)
         super.init()
-        UNUserNotificationCenter.current().delegate = self
+        UNUserNotificationCenter.current().delegate = self // Still set delegate for notification actions
         print("AirSyncMac: AndroidNotificationClient initialized for \(host):\(port)")
     }
 
@@ -69,8 +69,11 @@ class AndroidNotificationClient: NSObject, UNUserNotificationCenterDelegate {
             
             connection?.stateUpdateHandler = { [weak self] newState in
                 guard let self = self else { return }
-                DispatchQueue.main.async {
-                    ClientManager.shared.connectionUpdateHandler(newState)
+                // Assuming ClientManager.shared.connectionUpdateHandler exists and is called from elsewhere or not needed for this direct flow
+                // For the purpose of this file, we'll focus on its own logic.
+                // If ClientManager is essential for state, it would need to be involved.
+                 DispatchQueue.main.async {
+                    ClientManager.shared.connectionUpdateHandler(newState) // Keep this if ClientManager handles UI state
                 }
                 switch newState {
                 case .ready:
@@ -105,23 +108,24 @@ class AndroidNotificationClient: NSObject, UNUserNotificationCenterDelegate {
             isActuallyConnected = true
             reconnectTimer?.invalidate()
             
+            // These details would come from a shared configuration like ClientManager if this instance is the main one.
+            // For a temporary instance, these might not be fully relevant unless used by a method.
             let deviceName = ClientManager.shared.androidDeviceName
             let currentIpAddress = ClientManager.shared.currentHost
-            let scrcpyAdbPort = ClientManager.shared.currentScrcpyPort // MODIFIED: Get scrcpy/ADB port
+            let scrcpyAdbPort = ClientManager.shared.currentScrcpyPort
 
             DispatchQueue.main.async {
                 self.showSystemNotification(title: "AirSync", body: "Network connected to \(deviceName) (\(currentIpAddress)).")
             }
 
-            // MODIFIED: Use the configured scrcpy/ADB port
             let adbCommand = "adb connect \(currentIpAddress):\(scrcpyAdbPort)"
             print("AirSyncMac: Attempting auto ADB connect: \(adbCommand)")
 
             launchShellCommand(command: adbCommand, wait: true) { [weak self] adbSuccess, adbOutput, adbError in
                 DispatchQueue.main.async {
                     guard let strongSelf = self else { return }
-                    let adbTargetString = "\(currentIpAddress):\(scrcpyAdbPort)" // For checking output more accurately
-                    if adbSuccess && (adbOutput.contains("connected to \(adbTargetString)") || adbOutput.contains("already connected to \(adbTargetString)") || adbOutput.contains("connected to \(currentIpAddress)")){ // Last condition is a bit more general
+                    let adbTargetString = "\(currentIpAddress):\(scrcpyAdbPort)"
+                    if adbSuccess && (adbOutput.contains("connected to \(adbTargetString)") || adbOutput.contains("already connected to \(adbTargetString)") || adbOutput.contains("connected to \(currentIpAddress)")){
                         print("AirSyncMac: Auto ADB connect successful. Output: \(adbOutput)")
                         strongSelf.showSystemNotification(title: "AirSync", body: "ADB connected to \(deviceName) (\(adbTargetString)).")
                     } else {
@@ -150,17 +154,18 @@ class AndroidNotificationClient: NSObject, UNUserNotificationCenterDelegate {
                 print("AirSyncMac: Scheduling reconnect in 10 seconds.")
                 self.reconnectTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: false) { [weak self] _ in
                     print("AirSyncMac: Timer fired. Reconnecting...")
-                    self?.connect()
+                    self?.connect() // This instance would try to reconnect.
                 }
             }
         }
 
         private func receiveData() {
             guard isActuallyConnected, let connection = connection else {
-                print("AirSyncMac: Cannot receive data, not connected or connection nil.")
+                print("AirSyncMac: Cannot receive data, not connected or connection nil (instance: \(self)).")
                 if !isActuallyConnected {
-                     DispatchQueue.main.async { ClientManager.shared.connectionUpdateHandler(.failed(NWError.posix(.ENOTCONN))) }
-                     scheduleReconnect()
+                    // If ClientManager is involved, it should handle this state.
+                    // DispatchQueue.main.async { ClientManager.shared.connectionUpdateHandler(.failed(NWError.posix(.ENOTCONN))) }
+                    scheduleReconnect()
                 }
                 return
             }
@@ -169,14 +174,14 @@ class AndroidNotificationClient: NSObject, UNUserNotificationCenterDelegate {
                 if let error = error {
                     print("AirSyncMac: Receive error: \(error.localizedDescription).")
                     self.isActuallyConnected = false
-                    DispatchQueue.main.async { ClientManager.shared.connectionUpdateHandler(.failed(error)) }
+                    // DispatchQueue.main.async { ClientManager.shared.connectionUpdateHandler(.failed(error)) }
                     self.scheduleReconnect()
                     return
                 }
                 if isComplete {
                     print("AirSyncMac: Receive completed. Server closed connection.")
                     self.isActuallyConnected = false
-                    DispatchQueue.main.async { ClientManager.shared.connectionUpdateHandler(.cancelled) }
+                    // DispatchQueue.main.async { ClientManager.shared.connectionUpdateHandler(.cancelled) }
                     self.scheduleReconnect()
                     return
                 }
@@ -255,9 +260,12 @@ class AndroidNotificationClient: NSObject, UNUserNotificationCenterDelegate {
             print("AirSyncMac: showNotification called with App: \(data.app ?? "N/A"), Title: \(data.title ?? "N/A")")
             let content = UNMutableNotificationContent()
             
+            // These details would typically come from a shared source like ClientManager.
+            let deviceName = ClientManager.shared.androidDeviceName
+            let currentIpAddress = ClientManager.shared.currentHost
+
             let appName = data.app?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let originalTitle = data.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Notification"
-            let deviceName = ClientManager.shared.androidDeviceName
             
             content.title = !appName.isEmpty ? "\(appName): \(originalTitle)" : originalTitle
             content.subtitle = "From \(deviceName)"
@@ -272,7 +280,7 @@ class AndroidNotificationClient: NSObject, UNUserNotificationCenterDelegate {
                 print("AirSyncMac: PackageName is missing in notification data. 'View' action might not target a specific app.")
                 userInfo["packageName"] = ""
             }
-            userInfo["ipAddress"] = ClientManager.shared.currentHost
+            userInfo["ipAddress"] = currentIpAddress // From ClientManager
             content.userInfo = userInfo
             
             var notificationAttachments: [UNNotificationAttachment] = []
@@ -331,12 +339,13 @@ class AndroidNotificationClient: NSObject, UNUserNotificationCenterDelegate {
             guard let text = text else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
-            let deviceName = ClientManager.shared.androidDeviceName
+            let deviceName = ClientManager.shared.androidDeviceName // Assuming ClientManager.shared is accessible for this
             self.showSystemNotification(title: "AirSync", body: "Clipboard updated from \(deviceName).")
             print("AirSyncMac: Mac clipboard updated.")
         }
         
-        private func showSystemNotification(title: String, body: String) {
+        // This can be called by instance methods.
+        public func showSystemNotification(title: String, body: String) {
             DispatchQueue.main.async {
                 let content = UNMutableNotificationContent()
                 content.title = title
@@ -365,105 +374,141 @@ class AndroidNotificationClient: NSObject, UNUserNotificationCenterDelegate {
         }
 
         func disconnect() {
-            print("AirSyncMac: Disconnect called.")
+            print("AirSyncMac: Disconnect called (instance: \(self)).")
             reconnectTimer?.invalidate()
             connection?.cancel()
             isActuallyConnected = false
         }
         
-        // MARK: - UNUserNotificationCenterDelegate Methods -
-        func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                  didReceive response: UNNotificationResponse,
-                                  withCompletionHandler completionHandler: @escaping () -> Void) {
-            let userInfo = response.notification.request.content.userInfo
+    // MARK: - UNUserNotificationCenterDelegate Methods -
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                              didReceive response: UNNotificationResponse,
+                              withCompletionHandler completionHandler: @escaping () -> Void) {
+        let userInfo = response.notification.request.content.userInfo
 
-            if response.actionIdentifier == AndroidNotificationClient.viewActionIdentifier {
-                print("AirSyncMac: 'View' action tapped.")
-                let deviceName = ClientManager.shared.androidDeviceName
-                guard let packageName = userInfo["packageName"] as? String,
-                      let ipAddress = userInfo["ipAddress"] as? String, !ipAddress.isEmpty else {
-                    print("AirSyncMac: Error: Package name or IP address not found in notification userInfo for View action. IP: \(userInfo["ipAddress"] ?? "nil"), Package: \(userInfo["packageName"] ?? "nil")")
-                    completionHandler()
-                    return
-                }
+        if response.actionIdentifier == AndroidNotificationClient.viewActionIdentifier {
+            print("AirSyncMac: 'View' action tapped from notification.")
+            let deviceName = ClientManager.shared.androidDeviceName.replacingOccurrences(of: "'", with: "'\\''")
 
-                print("AirSyncMac: Performing 'View' action for package '\(packageName.isEmpty ? "Screen Mirror" : packageName)' on device (assumed ADB connected to \(ipAddress)).")
-
-                var scrcpyCommand = "/opt/scrcpy/scrcpy -m 800 -b 2M -e -S --video-codec=h265 --window-title='\(deviceName)'"
-                
-                if !packageName.isEmpty {
-                    scrcpyCommand += " --new-display=500x800 --start-app=\(packageName) --no-vd-system-decorations"
-                }
-                
-                print("AirSyncMac: Launching scrcpy command: \(scrcpyCommand)")
-
-                self.launchShellCommand(command: scrcpyCommand, wait: false) { [weak self] scrcpySuccess, scrcpyOutput, scrcpyError in
-                    if scrcpySuccess {
-                        print("AirSyncMac: scrcpy command launch initiated. Output/Log from launchShellCommand: \(scrcpyOutput)")
-                    } else {
-                        print("AirSyncMac: scrcpy command failed to initiate launch. Error: \(scrcpyError). Output: \(scrcpyOutput)")
-                        self?.showSystemNotification(title: "AirSync Action Failed", body: "Failed to start scrcpy. Ensure ADB is connected and scrcpy is configured. Error: \(scrcpyError)")
-                    }
-                }
+            guard let packageName = userInfo["packageName"] as? String,
+                  let ipAddress = userInfo["ipAddress"] as? String, !ipAddress.isEmpty else {
+                print("AirSyncMac: Error: Package name or IP address not found for View action. IP: \(userInfo["ipAddress"] ?? "nil"), Package: \(userInfo["packageName"] ?? "nil")")
                 completionHandler()
                 return
             }
-            completionHandler()
-        }
 
-        func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                  willPresent notification: UNNotification,
-                                  withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-            if #available(macOS 11.0, *) {
-                completionHandler([.banner, .list, .badge, .sound])
-            } else {
-                completionHandler([.alert, .badge, .sound])
+            print("AirSyncMac: Performing 'View' action for package '\(packageName.isEmpty ? "Screen Mirror" : packageName)' on IP '\(ipAddress)'. Window title: '\(deviceName)'")
+
+            // Using hardcoded /opt/scrcpy path as per your example
+            var scrcpyCommand = "/opt/scrcpy/scrcpy -m 800 -b 2M -e -S --video-codec=h265 --window-title='\(deviceName)'"
+            
+            if !packageName.isEmpty {
+                scrcpyCommand += " --new-display=500x800 --start-app=\(packageName) --no-vd-system-decorations"
             }
-        }
-
-        // launchShellCommand remains the same
-        private func launchShellCommand(command: String, wait: Bool, completion: ((Bool, String, String) -> Void)? = nil) {
-            DispatchQueue.global(qos: .userInitiated).async {
-                let task = Process()
-                let outputPipe = Pipe()
-                let errorPipe = Pipe()
-
-                task.standardOutput = outputPipe
-                task.standardError = errorPipe
-                
-                task.arguments = ["-cl", command]
-                task.executableURL = URL(fileURLWithPath: "/bin/zsh")
-
-                var environment = ProcessInfo.processInfo.environment
-                let commonToolPaths = ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin", environment["PATH"] ?? ""].filter { !$0.isEmpty }.joined(separator: ":")
-                environment["PATH"] = commonToolPaths
-                task.environment = environment
-                
-                do {
-                    try task.run()
-                    print("AirSyncMac: Executing \(wait ? "and waiting for" : "detached") command: \(command) with PATH: \(environment["PATH"] ?? "Not set")")
-
-                    if wait {
-                        task.waitUntilExit()
-                        
-                        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-                        let output = String(data: outputData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                        let errorOutput = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                        
-                        if task.terminationStatus == 0 {
-                            completion?(true, output, errorOutput)
-                        } else {
-                            let combinedError = "\(errorOutput)\nExit status: \(task.terminationStatus)".trimmingCharacters(in: .whitespacesAndNewlines)
-                            completion?(false, output, combinedError)
-                        }
-                    } else {
-                        completion?(true, "Launched (detached): \(command)", "")
-                    }
-                } catch {
-                    print("AirSyncMac: Failed to launch command '\(command)': \(error)")
-                    completion?(false, "", error.localizedDescription)
+            
+            print("AirSyncMac: Launching scrcpy from notification action: \(scrcpyCommand)")
+            // This `self` is the main, long-lived `AndroidNotificationClient` instance managed by ClientManager (due to delegate registration)
+            self.launchShellCommand(command: scrcpyCommand, wait: false) { [weak self] scrcpySuccess, scrcpyOutput, scrcpyError in
+                if scrcpySuccess {
+                    print("AirSyncMac: scrcpy (from notification) launch initiated. Output: \(scrcpyOutput)")
+                } else {
+                    print("AirSyncMac: scrcpy (from notification) failed to launch. Error: \(scrcpyError). Output: \(scrcpyOutput)")
+                    self?.showSystemNotification(title: "AirSync Action Failed", body: "Failed to start scrcpy. Error: \(scrcpyError)")
                 }
+            }
+            completionHandler()
+            return
+        }
+        completionHandler()
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                              willPresent notification: UNNotification,
+                              withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        if #available(macOS 11.0, *) {
+            completionHandler([.banner, .list, .badge, .sound])
+        } else {
+            completionHandler([.alert, .badge, .sound])
+        }
+    }
+    
+    // New public instance method for generic scrcpy launch
+    public func launchGenericScrcpy(deviceName: String) {
+        // deviceName is passed in, ensure it's shell-safe
+        let safeDeviceName = deviceName.replacingOccurrences(of: "'", with: "'\\''")
+
+        // Construct the generic scrcpy command
+        let scrcpyCommand = "/opt/scrcpy/scrcpy -m 800 -b 2M -e -S --video-codec=h265 --window-title='\(safeDeviceName)'"
+        
+        print("AirSyncMac: Launching generic scrcpy (instance method): \(scrcpyCommand)")
+        // This `self` will be the specific instance this method is called on (e.g., a temporary one from ControlPanelView)
+        self.launchShellCommand(command: scrcpyCommand, wait: false) { [weak self] success, output, error in
+            if success {
+                print("AirSyncMac: Generic scrcpy launch initiated. Output: \(output)")
+            } else {
+                print("AirSyncMac: Generic scrcpy failed to launch. Error: \(error). Output: \(output)")
+                // If this is a temporary client, self?.showSystemNotification might not be the "main" client's notification
+                // Consider if a static method to show system notification is better if called from a temporary client context.
+                // For now, it will use the instance's showSystemNotification.
+                self?.showSystemNotification(title: "AirSync Error", body: "Failed to start remote view. Error: \(error)")
             }
         }
     }
+
+    // New public static method to clear notifications and show confirmation
+    public static func clearAllMacNotifications() {
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+        print("AirSyncMac: All delivered and pending notifications cleared (static method).")
+    }
+    
+    // Using the simpler launchShellCommand from your provided code.
+    // Ensure adb and /opt/scrcpy/scrcpy are in PATH or accessible.
+    private func launchShellCommand(command: String, wait: Bool, completion: ((Bool, String, String) -> Void)? = nil) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let task = Process()
+            let outputPipe = Pipe()
+            let errorPipe = Pipe()
+
+            task.standardOutput = outputPipe
+            task.standardError = errorPipe
+            
+            task.arguments = ["-cl", command]
+            task.executableURL = URL(fileURLWithPath: "/bin/zsh")
+
+            var environment = ProcessInfo.processInfo.environment
+            // This simpler PATH means adb must be in one of these, and scrcpy is called by full path
+            let commonToolPaths = ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin", environment["PATH"] ?? ""].filter { !$0.isEmpty }.joined(separator: ":")
+            environment["PATH"] = commonToolPaths
+            // For adb, ensure ~/Library/Android/sdk/platform-tools is in the path or use full path to adb
+            // If adb is not found, the 'adb connect' in handleConnectionReady will fail.
+            task.environment = environment
+            
+            do {
+                try task.run()
+                print("AirSyncMac: Executing \(wait ? "and waiting for" : "detached") command: \(command) with PATH: \(environment["PATH"] ?? "Not set")")
+
+                if wait {
+                    task.waitUntilExit()
+                    
+                    let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                    let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                    let output = String(data: outputData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    let errorOutput = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    
+                    if task.terminationStatus == 0 {
+                        completion?(true, output, errorOutput)
+                    } else {
+                        let combinedError = "Error Output: \(errorOutput)\nOutput: \(output)\nExit status: \(task.terminationStatus)".trimmingCharacters(in: .whitespacesAndNewlines)
+                        completion?(false, output, combinedError)
+                    }
+                } else {
+                    completion?(true, "Launched (detached): \(command)", "")
+                }
+            } catch {
+                print("AirSyncMac: Failed to launch command '\(command)': \(error)")
+                completion?(false, "", error.localizedDescription)
+            }
+        }
+    }
+}
