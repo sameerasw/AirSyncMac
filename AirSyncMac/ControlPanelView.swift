@@ -5,7 +5,8 @@ struct ControlPanelView: View {
     @StateObject private var clientManager = ClientManager.shared
     
     @State private var editHost: String = ""
-    @State private var editPort: String = ""
+    @State private var editPort: String = "" // App communication port
+    @State private var editScrcpyPort: String = "" // New: Scrcpy/ADB port
     @State private var editDeviceName: String = ""
 
     @State private var isMacClipboardEmpty: Bool = true
@@ -29,12 +30,16 @@ struct ControlPanelView: View {
                         TextField("Android IP Address", text: $editHost)
                             .textFieldStyle(.roundedBorder)
                             .onSubmit(saveSettingsAndAttemptConnect)
-
-                        TextField("Port", text: $editPort)
+                        
+                        TextField("App Port", text: $editPort) // Clarified label
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 80)
                             .onSubmit(saveSettingsAndAttemptConnect)
                     }
+                    // New TextField for Scrcpy/ADB Port
+                    TextField("Scrcpy/ADB Port (e.g., 5555)", text: $editScrcpyPort)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(saveSettingsAndAttemptConnect)
                 }
 
                 HStack {
@@ -48,7 +53,7 @@ struct ControlPanelView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.regular)
-                    .disabled(editHost.isEmpty || editPort.isEmpty || UInt16(editPort) == nil)
+                    .disabled(editHost.isEmpty || editPort.isEmpty || UInt16(editPort) == nil || editScrcpyPort.isEmpty || UInt16(editScrcpyPort) == nil) // Added scrcpy port validation to disabled state
 
                     if clientManager.isConnectingOrConnected {
                         Button(action: { clientManager.disconnect() }) {
@@ -106,6 +111,7 @@ struct ControlPanelView: View {
         .onAppear {
             editHost = clientManager.currentHost
             editPort = String(clientManager.currentPort)
+            editScrcpyPort = String(clientManager.currentScrcpyPort) // New
             editDeviceName = clientManager.androidDeviceName
             updateMacClipboardStatus()
         }
@@ -115,8 +121,13 @@ struct ControlPanelView: View {
     }
 
     private func saveSettingsAndAttemptConnect() {
-        guard let portNumber = UInt16(editPort), portNumber > 0 else {
-            clientManager.connectionStatus = "Error: Invalid Port"
+        guard let appPortNumber = UInt16(editPort), appPortNumber > 0 else {
+            clientManager.connectionStatus = "Error: Invalid App Port"
+            return
+        }
+        
+        guard let scrcpyPortNumber = UInt16(editScrcpyPort), scrcpyPortNumber > 0 else { // New validation
+            clientManager.connectionStatus = "Error: Invalid Scrcpy/ADB Port"
             return
         }
 
@@ -124,8 +135,9 @@ struct ControlPanelView: View {
 
         clientManager.updateSettings(
             host: editHost,
-            port: portNumber,
-            deviceName: deviceNameToSave
+            port: appPortNumber,
+            deviceName: deviceNameToSave,
+            scrcpyPort: scrcpyPortNumber // New
         )
         clientManager.connect()
     }
@@ -162,7 +174,6 @@ struct ConnectionStatusIndicator: View {
     }
 }
 
-/// macOS glass effect wrapper using NSVisualEffectView
 struct VisualEffectView: NSViewRepresentable {
     var material: NSVisualEffectView.Material
     var blendingMode: NSVisualEffectView.BlendingMode
@@ -187,7 +198,7 @@ struct VisualEffectView: NSViewRepresentable {
 struct ControlPanelView_Previews: PreviewProvider {
     static var previews: some View {
         ControlPanelView()
-            .frame(width: 420, height: 520)
+            .frame(width: 420, height: 550) // Adjusted height slightly for the new field
             .preferredColorScheme(.dark)
     }
 }

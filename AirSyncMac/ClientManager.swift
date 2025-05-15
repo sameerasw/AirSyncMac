@@ -3,6 +3,7 @@ import Combine
 import Network
 import SwiftUI
 import AppKit
+import UserNotifications // Ensure this is imported if ClientManager makes any direct UN calls
 
 // Payload for sending clipboard to Android
 struct ClipboardPushPayload: Codable {
@@ -15,11 +16,13 @@ class ClientManager: ObservableObject {
 
     private let hostKey = "AirSyncMac.Host"
     private let portKey = "AirSyncMac.Port"
-    private let deviceNameKey = "AirSyncMac.DeviceName" // New Key
+    private let deviceNameKey = "AirSyncMac.DeviceName"
+    private let scrcpyPortKey = "AirSyncMac.ScrcpyPort" // New Key for scrcpy/ADB port
 
     @Published var currentHost: String
-    @Published var currentPort: UInt16
-    @Published var androidDeviceName: String // New Published Property
+    @Published var currentPort: UInt16 // This is for the app's own communication channel
+    @Published var currentScrcpyPort: UInt16 // New: Port for scrcpy's ADB connection
+    @Published var androidDeviceName: String
     @Published var textToSendToAndroidClipboard: String = ""
 
     @Published var isConnected = false {
@@ -40,44 +43,55 @@ class ClientManager: ObservableObject {
         self.currentHost = UserDefaults.standard.string(forKey: hostKey) ?? "192.168.8.101"
         let savedPort = UserDefaults.standard.integer(forKey: portKey)
         self.currentPort = savedPort > 0 ? UInt16(savedPort) : 12345
-        self.androidDeviceName = UserDefaults.standard.string(forKey: deviceNameKey) ?? "Phone" // Initialize device name
+        
+        let savedScrcpyPort = UserDefaults.standard.integer(forKey: scrcpyPortKey) // New
+        self.currentScrcpyPort = savedScrcpyPort > 0 ? UInt16(savedScrcpyPort) : 5555 // New, default 5555
+        
+        self.androidDeviceName = UserDefaults.standard.string(forKey: deviceNameKey) ?? "Phone"
+        
+        AndroidNotificationClient.registerNotificationCategories()
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+            if granted {
+                print("AirSyncMac: Notification permission granted.")
+            } else if let error = error {
+                print("AirSyncMac: Notification permission error: \(error.localizedDescription)")
+            } else {
+                print("AirSyncMac: Notification permission denied.")
+            }
+        }
         updateConnectingOrConnectedState()
     }
 
     private func updateConnectingOrConnectedState() {
-        isConnectingOrConnected = isConnected || ["Connecting...", "Preparing...", "Setup...", "Waiting..."].contains(connectionStatus)
+        isConnectingOrConnected = isConnected || ["Connecting...", "Preparing...", "Setup...", "Waiting..."].contains(where: connectionStatus.starts(with:))
     }
 
-    // Updated function to also handle device name
-    func updateSettings(host: String, port: UInt16, deviceName: String) {
+    // Updated function to also handle device name and scrcpy port
+    func updateSettings(host: String, port: UInt16, deviceName: String, scrcpyPort: UInt16) { // MODIFIED signature
         currentHost = host
         currentPort = port
-        androidDeviceName = deviceName.isEmpty ? "Phone" : deviceName // Ensure not empty, default to "Phone"
+        currentScrcpyPort = scrcpyPort // New
+        androidDeviceName = deviceName.isEmpty ? "Phone" : deviceName
 
         UserDefaults.standard.set(host, forKey: hostKey)
         UserDefaults.standard.set(Int(port), forKey: portKey)
-        UserDefaults.standard.set(androidDeviceName, forKey: deviceNameKey) // Save device name
+        UserDefaults.standard.set(Int(scrcpyPort), forKey: scrcpyPortKey) // New
+        UserDefaults.standard.set(androidDeviceName, forKey: deviceNameKey)
         
-        print("AirSyncMac: Settings updated. Host: \(currentHost), Port: \(currentPort), Device Name: \(androidDeviceName)")
+        print("AirSyncMac: Settings updated. Host: \(currentHost), App Port: \(currentPort), Device Name: \(androidDeviceName), Scrcpy/ADB Port: \(currentScrcpyPort)")
 
-        // If connection settings change and we are connected, we might want to disconnect and reconnect.
-        // Or, just update for next connection attempt. For now, this just updates the settings.
-        // If you want to force a reconnect with new settings:
-        // if isConnected || isConnectingOrConnected {
-        //     disconnect()
-        //     // Optionally auto-connect, or let the user click "Connect" again
-        //     // connect()
-        // }
+        if isConnected || isConnectingOrConnected {
+             print("AirSyncMac: Settings changed while connected/connecting. Disconnecting to apply new settings on next connect.")
+             disconnect()
+        }
     }
-
 
     func connect() {
         if androidClient != nil {
             androidClient?.disconnect()
+            androidClient = nil
         }
-        // Pass the device name to the AndroidNotificationClient if it needs it directly,
-        // or it can fetch it from ClientManager.shared.androidDeviceName
-        androidClient = AndroidNotificationClient(host: currentHost, port: currentPort)
+        androidClient = AndroidNotificationClient(host: currentHost, port: currentPort) // Scrcpy port is read by client from ClientManager.shared
         connectionStatus = "Connecting..."
         androidClient?.connect()
     }
