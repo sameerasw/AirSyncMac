@@ -16,7 +16,9 @@ struct ControlPanelView: View {
             VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
                 .edgesIgnoringSafeArea(.all)
 
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 15) {
+                Spacer()
+                
                 Text("Device Settings")
                     .font(.title2)
                     .bold()
@@ -26,6 +28,11 @@ struct ControlPanelView: View {
                         .textFieldStyle(.roundedBorder)
                         .onSubmit(saveSettingsAndAttemptConnect)
 
+                    
+                        Text("Android Server")
+                        .font(.callout)
+                        .alignmentGuide(.leading) { $0[HorizontalAlignment.leading] }
+                    
                     HStack(spacing: 12) {
                         TextField("Android IP Address", text: $editHost)
                             .textFieldStyle(.roundedBorder)
@@ -36,10 +43,14 @@ struct ControlPanelView: View {
                             .frame(width: 80)
                             .onSubmit(saveSettingsAndAttemptConnect)
                     }
-                    // New TextField for Scrcpy/ADB Port
-                    TextField("Scrcpy/ADB Port (e.g., 5555)", text: $editScrcpyPort)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit(saveSettingsAndAttemptConnect)
+                    HStack(spacing: 12) {
+                        Text("ADB port")
+                            .font(.caption)
+                        // New TextField for Scrcpy/ADB Port
+                        TextField("Scrcpy/ADB Port (e.g., 5555)", text: $editScrcpyPort)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit(saveSettingsAndAttemptConnect)
+                    }
                 }
 
                 HStack {
