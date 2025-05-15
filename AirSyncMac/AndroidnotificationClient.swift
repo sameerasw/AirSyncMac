@@ -379,6 +379,7 @@ class AndroidNotificationClient: NSObject, UNUserNotificationCenterDelegate {
 
             if response.actionIdentifier == AndroidNotificationClient.viewActionIdentifier {
                 print("AirSyncMac: 'View' action tapped.")
+                let deviceName = ClientManager.shared.androidDeviceName
                 guard let packageName = userInfo["packageName"] as? String,
                       let ipAddress = userInfo["ipAddress"] as? String, !ipAddress.isEmpty else {
                     print("AirSyncMac: Error: Package name or IP address not found in notification userInfo for View action. IP: \(userInfo["ipAddress"] ?? "nil"), Package: \(userInfo["packageName"] ?? "nil")")
@@ -388,7 +389,7 @@ class AndroidNotificationClient: NSObject, UNUserNotificationCenterDelegate {
 
                 print("AirSyncMac: Performing 'View' action for package '\(packageName.isEmpty ? "Screen Mirror" : packageName)' on device (assumed ADB connected to \(ipAddress)).")
 
-                var scrcpyCommand = "/opt/scrcpy/scrcpy -m 800 -b 2M -e -S --video-codec=h265 --window-title='Sameera Pixel'"
+                var scrcpyCommand = "/opt/scrcpy/scrcpy -m 800 -b 2M -e -S --video-codec=h265 --window-title='\(deviceName)'"
                 
                 if !packageName.isEmpty {
                     scrcpyCommand += " --new-display=500x800 --start-app=\(packageName) --no-vd-system-decorations"
