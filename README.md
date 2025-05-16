@@ -109,6 +109,12 @@ Get [from releases](https://github.com/sameerasw/AirSyncMac/releases/latest).
 
 ## Configuration
 
+First you need to run the below command to allow the app to be executed because I got no paid Apple developer account so it's not universally signed and sanitized.
+
+```sh
+xattr -d com.apple.quarantine /Applications/AirSyncMac.app
+```
+
 1. **Initial Setup:**  
    - Launch AirSyncMac.
    - Allow network and show notification permissions as prompted.
