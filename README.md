@@ -78,6 +78,7 @@ AirSync Mac is designed for functionality, speed, and a native macOS experience 
 - macOS 10.15 (Catalina) or higher, actually I'm not sure
 - [AirSync for Android](https://github.com/sameerasw/AirSync) installed on your Android device
 - Both devices on the same Wi-Fi network
+- scrcpy installed via brew - If you want scrcpy to open the device screen mirroring, this is experimental
 
 ### Installation
 
